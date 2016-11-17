@@ -87,7 +87,7 @@ typedef struct _timeline {
 static TCHAR winclass[] = TEXT("mainwindow");
 static TCHAR wintitle[] = TEXT("demo");
 static int win_width = 800;
-static int win_height = 600;
+static int win_height = 400;
 HWND mainwindow;
 
 static IWICImagingFactory *pWICFactory = NULL;
@@ -105,6 +105,7 @@ static ID2D1SolidColorBrush *pWicBlackBrush = NULL;
 static IDWriteTextFormat *pTextFormat = NULL;
 
 static IWICBitmap *pWicBitmap = NULL;
+static IWICBitmap *pWicPartBitmap = NULL;
 static ID2D1Bitmap *pBitmap = NULL;
 static ID2D1Bitmap *pBitmapPart = NULL;
 
@@ -112,7 +113,7 @@ static int fps = 0;
 
 static int pos_display = 0;
 
-static int data_count = 200;
+static int data_count = 100;
 static timeline_t *origin_data = NULL;
 static timeline_t *win_data = NULL;
 
@@ -121,7 +122,6 @@ static wchar_t text_info_array[128];
 static float data_ratio = 1.0;
 
 static int image_width;
-static int image_height;
 
 /*
 *==============================================================================
@@ -214,10 +214,7 @@ static void scan_data_to_get_ratio(void)
 
   image_width = end_pos - start_pos;
 
-  // Qustion
-  image_height = 600;
-
-  printf("image: %d x %d\n", image_width, image_height);
+  printf("image: %d x %d\n", image_width, win_height);
 }
 
 static int create_d2d_factory(HWND hwnd, UINT32 width, UINT32 height)
@@ -292,7 +289,7 @@ static int create_text_factory(void)
   //pTextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 }
 
-static int create_wic_factory(UINT32 width, UINT32 height)
+static int create_wic_factory(UINT32 img_width, UINT32 win_width, UINT32 height)
 {
   HRESULT hr;
 
@@ -315,8 +312,18 @@ static int create_wic_factory(UINT32 width, UINT32 height)
     return S_FALSE;
   }
 
+  /* Create bitmap for draw */
+
   /* WARNING: will error if parameters not correct. */
-  hr = pWICFactory->CreateBitmap(width, height, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &pWicBitmap);
+  hr = pWICFactory->CreateBitmap(img_width, height, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &pWicBitmap);
+  if (S_OK != hr) {
+    printf("%d err = %x\n", __LINE__, GetLastError());
+    return S_FALSE;
+  }
+
+  /* Create bitmap for copy part */
+
+  hr = pWICFactory->CreateBitmap(win_width, height, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &pWicPartBitmap);
   if (S_OK != hr) {
     printf("%d err = %x\n", __LINE__, GetLastError());
     return S_FALSE;
@@ -392,7 +399,7 @@ static void draw_wic_bitmap(void)
 
   wchar_t testinfo[64];
 
-  pWicRenderTarget->DrawLine(D2D1::Point2F(0, 0), D2D1::Point2F(image_width, image_height), pRedBrush);
+  pWicRenderTarget->DrawLine(D2D1::Point2F(0, 0), D2D1::Point2F(image_width, win_height), pRedBrush);
 
 #if 0
   for (int i = 0; i < data_count; i++) {
@@ -422,9 +429,9 @@ static int create_d2d_bitmap(void)
     printf("err = %x\n", GetLastError());
     return S_FALSE;
   }
-
+  
   /* Create D2D Bitmap for part */
-  hr = pRenderTarget->CreateBitmapFromWicBitmap(pWicBitmap, &pBitmapPart);
+  hr = pRenderTarget->CreateBitmapFromWicBitmap(pWicPartBitmap, &pBitmapPart);
   if (S_OK != hr) {
     printf("err = %x\n", GetLastError());
     return S_FALSE;
@@ -442,10 +449,8 @@ static int CreateD2DResource(HWND hwnd)
   /* 创建字体资源工厂 */
   create_text_factory();
 
-  image_height = win_height;
-
   /* 创建图片资源工厂 */
-  create_wic_factory(image_width, image_height);
+  create_wic_factory(image_width, win_width, win_height);
 
   /* 图像处理工厂：绘图器 */
   create_wic_bitmap_render_target();
@@ -468,14 +473,12 @@ static void DrawRectangle(HWND hwnd)
   // clear canvas, not validate now
   pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
 
-  D2D1_RECT_U src = { pos_display, 0, pos_display+win_width, win_height};
+  D2D1_RECT_U src = { pos_display, 0, pos_display + win_width, win_height};
   D2D1_POINT_2U point = { 0, 0 };
 
   pBitmapPart->CopyFromBitmap(&point, pBitmap, &src);
 
   pRenderTarget->DrawBitmap(pBitmapPart, D2D1::RectF(0, 0, win_width, win_height));
-
-  //pRenderTarget->DrawBitmap(pBitmap, D2D1::RectF(0, 0, win_width, win_height));
 
   /* NOTE: Flush the content to windows */
   pRenderTarget->EndDraw();
