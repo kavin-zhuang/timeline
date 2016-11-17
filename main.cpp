@@ -288,7 +288,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
   switch (uMsg)
   {
   case WM_TIMER:
-    pos ++;
+    pos += 4;
     if (pos > 400)
       pos = 0;
     GetClientRect(hwnd, &rect);
@@ -299,7 +299,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     InvalidateRect(hwnd, &rect, FALSE);
     return 0;
   case WM_CREATE:
-    SetTimer(hwnd, NULL, 20, NULL);
+    SetTimer(hwnd, NULL, 10, NULL);
     if (S_OK != CreateD2DResource(hwnd)) {
       printf("D2D Init failed\n");
     }
