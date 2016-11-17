@@ -87,7 +87,7 @@ typedef struct _timeline {
 static TCHAR winclass[] = TEXT("mainwindow");
 static TCHAR wintitle[] = TEXT("demo");
 static int win_width = 800;
-static int win_height = 400;
+static int win_height = 260;
 HWND mainwindow;
 
 static IWICImagingFactory *pWICFactory = NULL;
@@ -110,6 +110,7 @@ static ID2D1Bitmap *pBitmap = NULL;
 static ID2D1Bitmap *pBitmapPart = NULL;
 
 static int fps = 0;
+static int fps_cnt = 0;
 
 static int pos_display = 0;
 
@@ -386,35 +387,9 @@ static void draw_wic_bitmap(void)
 
   pWicRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
 
-  //pWicRenderTarget->DrawRectangle(D2D1::RectF(pos, pos, pos + 100, pos + 100), pWhiteBrush, 1);
-
-  D2D1_SIZE_F renderTargetSize = pRenderTarget->GetSize();
-
-  pWicRenderTarget->DrawText(
-    text_info_array,
-    ARRAYSIZE(text_info_array) - 1,
-    pTextFormat,
-    D2D1::RectF(0, 10, 120, 20),
-    pWicBlackBrush);
-
-  wchar_t testinfo[64];
-
-  pWicRenderTarget->DrawLine(D2D1::Point2F(0, 0), D2D1::Point2F(image_width, win_height), pRedBrush);
-
-#if 0
   for (int i = 0; i < data_count; i++) {
-    //draw_line(win_data[i].task, win_data[i].start, win_data[i].stop);
-    //draw_line(i%10+100, 10 * i, 10 * i + 10);
-
-    wsprintf(testinfo, L"%d", i);
-    pWicRenderTarget->DrawText(
-      testinfo,
-      ARRAYSIZE(testinfo) - 1,
-      pTextFormat,
-      D2D1::RectF(i, 100, 20, 20),
-      pWicBlackBrush);
+    draw_line(win_data[i].task, win_data[i].start, win_data[i].stop);
   }
-#endif
 
   pWicRenderTarget->EndDraw();
 }
@@ -480,6 +455,15 @@ static void DrawRectangle(HWND hwnd)
 
   pRenderTarget->DrawBitmap(pBitmapPart, D2D1::RectF(0, 0, win_width, win_height));
 
+  swprintf(text_info_array, L"ratio: %0.2f\nfps: %d", data_ratio, fps_cnt);
+
+  pRenderTarget->DrawText(
+    text_info_array,
+    ARRAYSIZE(text_info_array) - 1,
+    pTextFormat,
+    D2D1::RectF(10, 10, 120, 20),
+    pBlackBrush);
+
   /* NOTE: Flush the content to windows */
   pRenderTarget->EndDraw();
 }
@@ -513,7 +497,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     return 0;
   case WM_PAINT:
     if (GetTickCount() - pretick > 1000) {
-      //printf("fps: %d\n", fps);
+      fps_cnt = fps;
       fps = 0;
       pretick = GetTickCount();
     }
@@ -558,8 +542,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
   freopen("CONOUT$", "w", stdout);
 
   printf("Hello World\n");
-
-  swprintf(text_info_array, L"ratio: %0.2f\nfps: %d", data_ratio, fps);
 
   srand((unsigned)time(NULL));
 
