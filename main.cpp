@@ -27,14 +27,50 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/*
+*==============================================================================
+* Namespaces
+*==============================================================================
+*/
+
 using namespace Gdiplus;
 
+/*
+*==============================================================================
+* Compiler Control
+*==============================================================================
+*/
+
 #pragma warning(disable:4996)
+
+/*
+*==============================================================================
+* Librarys
+*==============================================================================
+*/
 
 #pragma comment(lib,"gdiplus")
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "Windowscodecs.lib")
+
+/*
+*==============================================================================
+* Types
+*==============================================================================
+*/
+
+typedef struct _timeline {
+  int start;
+  int stop;
+  int task;
+} timeline_t;
+
+/*
+*==============================================================================
+* Local Varibles
+*==============================================================================
+*/
 
 static TCHAR winclass[] = TEXT("mainwindow");
 static TCHAR wintitle[] = TEXT("demo");
@@ -55,6 +91,28 @@ static IWICBitmap *pWicBitmap = NULL;
 static ID2D1Bitmap *pBitmap = NULL;
 
 static int pos = 0;
+
+static timeline_t origin_data[4] = {
+  { 0, 100, 100 },
+  { 100, 200, 200 },
+  { 200, 300, 100 },
+  { 300, 400, 200 },
+};
+
+/*
+*==============================================================================
+* Local Functions
+*==============================================================================
+*/
+
+static void scan_data_to_get_ratio(void)
+{
+  int i;
+
+  int num = ARRAYSIZE(origin_data);
+
+  printf("num = %d\n", num);
+}
 
 static int create_d2d_factory(HWND hwnd, UINT32 width, UINT32 height)
 {
@@ -224,6 +282,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
   PAINTSTRUCT ps;
   RECT rect;
 
+  static int pretick = 0;
+  static int fps = 0;
+
   switch (uMsg)
   {
   case WM_TIMER:
@@ -231,22 +292,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     if (pos > 400)
       pos = 0;
     GetClientRect(hwnd, &rect);
-    InvalidateRect(hwnd, &rect, TRUE);
+    InvalidateRect(hwnd, &rect, FALSE);
     return 0;
   case WM_COMMAND:
     GetClientRect(hwnd, &rect);
-    InvalidateRect(hwnd, &rect, TRUE);
+    InvalidateRect(hwnd, &rect, FALSE);
     return 0;
   case WM_CREATE:
-    SetTimer(hwnd, NULL, 50, NULL);
+    SetTimer(hwnd, NULL, 20, NULL);
     if (S_OK != CreateD2DResource(hwnd)) {
       printf("D2D Init failed\n");
     }
     return 0;
   case WM_PAINT:
+    if (GetTickCount() - pretick > 1000) {
+      printf("fps: %d\n", fps);
+      fps = 0;
+      pretick = GetTickCount();
+    }
     hdc = BeginPaint(hwnd, &ps);
     DrawRectangle(hwnd);
     EndPaint(hwnd, &ps);
+    fps++;
     return 0;
   case WM_DESTROY:
     PostQuitMessage(0);
@@ -284,6 +351,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
   freopen("CONOUT$", "w", stdout);
 
   printf("Hello World\n");
+
+  /* 可以显示LOGO后，先处理后台数据 */
+  scan_data_to_get_ratio();
 
   /* GDI+ Init */
   ULONG_PTR gdiplusToken;
