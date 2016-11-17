@@ -26,6 +26,9 @@
 /* ISO C99 */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <wchar.h>
 
 /*
 *==============================================================================
@@ -56,14 +59,23 @@ using namespace Gdiplus;
 
 /*
 *==============================================================================
+* Defines
+*==============================================================================
+*/
+
+#define TRACE(fmt, ...) \
+  printf("[%s:%d] " fmt, __FUNCTION__, __LINE__, ##__VAR_ARGS__);
+
+/*
+*==============================================================================
 * Types
 *==============================================================================
 */
 
 typedef struct _timeline {
-  int start;
-  int stop;
-  int task;
+  uint64_t start;
+  uint64_t stop;
+  uint32_t task;
 } timeline_t;
 
 /*
@@ -80,24 +92,35 @@ HWND mainwindow;
 
 static IWICImagingFactory *pWICFactory = NULL;
 static ID2D1Factory1* pD2DFactory = NULL;
+static IDWriteFactory *pDWriteFactory = NULL;
 
 static ID2D1HwndRenderTarget *pRenderTarget = NULL;
 static ID2D1RenderTarget *pWicRenderTarget = NULL;
 
 static ID2D1SolidColorBrush *pBlackBrush = NULL;
 static ID2D1SolidColorBrush *pWhiteBrush = NULL;
+static ID2D1SolidColorBrush *pRedBrush = NULL;
+static ID2D1SolidColorBrush *pWicBlackBrush = NULL;
+
+static IDWriteTextFormat *pTextFormat = NULL;
 
 static IWICBitmap *pWicBitmap = NULL;
 static ID2D1Bitmap *pBitmap = NULL;
 
+static int fps = 0;
+
 static int pos = 0;
 
-static timeline_t origin_data[4] = {
-  { 0, 100, 100 },
-  { 100, 200, 200 },
-  { 200, 300, 100 },
-  { 300, 400, 200 },
-};
+static int data_count = 1000;
+static timeline_t *origin_data = NULL;
+static timeline_t *win_data = NULL;
+
+static wchar_t text_info_array[128];
+
+static float data_ratio = 1.0;
+
+static int image_width;
+static int image_height;
 
 /*
 *==============================================================================
@@ -105,13 +128,88 @@ static timeline_t origin_data[4] = {
 *==============================================================================
 */
 
+static void generate_random_data(void)
+{
+  int i;
+
+  origin_data = (timeline_t *)malloc(data_count * sizeof(timeline_t));
+  if (NULL == origin_data) {
+    printf("malloc for data failed\n");
+    return;
+  }
+
+  uint64_t pos_x = 0;
+
+  for (i = 0; i < data_count; i++) {
+    origin_data[i].task = rand() % 255;
+    origin_data[i].start = pos_x;
+    pos_x += 10;
+    origin_data[i].stop = pos_x;
+    pos_x += 0;
+  }
+}
+
 static void scan_data_to_get_ratio(void)
 {
   int i;
 
-  int num = ARRAYSIZE(origin_data);
+  int num = data_count;
 
-  printf("num = %d\n", num);
+  if (NULL == origin_data) {
+    printf("origin_data is NULL\n");
+    return;
+  }
+
+  win_data = (timeline_t *)malloc(num * sizeof(timeline_t));
+  if (NULL == win_data) {
+    printf("malloc for data failed\n");
+    return;
+  }
+
+  uint64_t start_pos = 0xFFFFFFFF;
+  uint64_t end_pos = 0;
+  for (i = 0; i < num; i++) {
+    if (origin_data[i].start < start_pos) {
+      start_pos = origin_data[i].start;
+    }
+    if (origin_data[i].stop > end_pos) {
+      end_pos = origin_data[i].stop;
+    }
+  }
+
+#ifdef FULL_SHOW
+  uint64_t diff = end_pos - start_pos;
+
+  printf("diff = %lld\n", diff);
+  
+  data_ratio = diff / (float)win_width;
+
+  printf("ratio = %f\n", data_ratio);
+#endif
+
+  for (i = 0; i < num; i++) {
+    win_data[i].start = (origin_data[i].start - start_pos) / data_ratio;
+    win_data[i].stop = (origin_data[i].stop - start_pos) / data_ratio;
+    win_data[i].task = origin_data[i].task;
+
+    /* BUG: what happends if value > 0xFFFFFFFF */
+    //printf("%d : %d %d\n", win_data[i].task, win_data[i].start, win_data[i].stop);
+  }
+
+  // generate the pixel data width & height, for static large image
+  for (i = 0; i < num; i++) {
+    if (win_data[i].start < start_pos) {
+      start_pos = win_data[i].start;
+    }
+    if (win_data[i].stop > end_pos) {
+      end_pos = win_data[i].stop;
+    }
+  }
+
+  image_width = end_pos - start_pos;
+  image_height = 600;
+
+  printf("image: %d x %d\n", image_width, image_height);
 }
 
 static int create_d2d_factory(HWND hwnd, UINT32 width, UINT32 height)
@@ -152,6 +250,38 @@ static int create_d2d_factory(HWND hwnd, UINT32 width, UINT32 height)
   if (S_OK != hr) {
     return S_FALSE;
   }
+}
+
+static int create_text_factory(void)
+{
+  HRESULT hr;
+
+  hr = DWriteCreateFactory(
+    DWRITE_FACTORY_TYPE_SHARED,
+    __uuidof(IDWriteFactory),
+    (IUnknown**)&pDWriteFactory);
+  if (S_OK != hr) {
+    printf("DWrite Factory Inited failed\n");
+    return S_FALSE;
+  }
+
+  hr = pDWriteFactory->CreateTextFormat(
+    L"segoe print",
+    NULL,
+    DWRITE_FONT_WEIGHT_NORMAL,
+    DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_STRETCH_NORMAL,
+    17.0f,
+    L"en-us", //locale
+    &pTextFormat);
+  if (S_OK != hr) {
+    printf("TextFormat Inited failed\n");
+    return S_FALSE;
+  }
+
+  // Center the text horizontally and vertically.
+  //pTextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+  //pTextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 }
 
 static int create_wic_factory(UINT32 width, UINT32 height)
@@ -209,7 +339,28 @@ static int create_wic_bitmap_render_target(void)
     return S_FALSE;
   }
 
+  hr = pWicRenderTarget->CreateSolidColorBrush(
+    D2D1::ColorF(D2D1::ColorF::Red),
+    &pRedBrush
+    );
+  if (S_OK != hr) {
+    return S_FALSE;
+  }
+
+  hr = pWicRenderTarget->CreateSolidColorBrush(
+    D2D1::ColorF(D2D1::ColorF::Black),
+    &pWicBlackBrush
+    );
+  if (S_OK != hr) {
+    return S_FALSE;
+  }
+
   return 0;
+}
+
+static void draw_line(int y, int x1, int x2)
+{
+  pWicRenderTarget->DrawLine(D2D1::Point2F(x1, y), D2D1::Point2F(x2, y), pRedBrush);
 }
 
 static void draw_wic_bitmap(void)
@@ -218,8 +369,22 @@ static void draw_wic_bitmap(void)
 
   pWicRenderTarget->BeginDraw();
 
-  pWicRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Green));
-  pWicRenderTarget->DrawRectangle(D2D1::RectF(pos, pos, pos + 100, pos + 100), pWhiteBrush, 1);
+  pWicRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
+
+  //pWicRenderTarget->DrawRectangle(D2D1::RectF(pos, pos, pos + 100, pos + 100), pWhiteBrush, 1);
+
+  D2D1_SIZE_F renderTargetSize = pRenderTarget->GetSize();
+
+  pWicRenderTarget->DrawText(
+    text_info_array,
+    ARRAYSIZE(text_info_array) - 1,
+    pTextFormat,
+    D2D1::RectF(0, 10, 120, 20),
+    pWicBlackBrush);
+
+  for (int i = 0; i < data_count; i++) {
+    draw_line(win_data[i].task, win_data[i].start, win_data[i].stop);
+  }
 
   pWicRenderTarget->EndDraw();
 }
@@ -244,11 +409,20 @@ static int CreateD2DResource(HWND hwnd)
   /* 创立图像处理工厂 */
   create_d2d_factory(hwnd, win_width, win_height);
 
+  /* 创建字体资源工厂 */
+  create_text_factory();
+
   /* 创建图片资源工厂 */
   create_wic_factory(win_width, win_height);
 
   /* 图像处理工厂：绘图器 */
   create_wic_bitmap_render_target();
+
+  /* 绘图中... */
+  draw_wic_bitmap();
+
+  /* 图像转换成可以显示的方式 */
+  create_d2d_bitmap();
 
   return 0;
 }
@@ -262,18 +436,10 @@ static void DrawRectangle(HWND hwnd)
   // clear canvas, not validate now
   pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
 
-  /* 绘图中... */
-  draw_wic_bitmap();
-
-  /* 图像转换成可以显示的方式 */
-  create_d2d_bitmap();
-
-  pRenderTarget->DrawBitmap(pBitmap, D2D1::RectF(0, 0, win_width, win_height));
+  pRenderTarget->DrawBitmap(pBitmap, D2D1::RectF(pos, 0, win_width, win_height));
 
   /* NOTE: Flush the content to windows */
   pRenderTarget->EndDraw();
-
-  pBitmap->Release();
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -283,7 +449,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
   RECT rect;
 
   static int pretick = 0;
-  static int fps = 0;
 
   switch (uMsg)
   {
@@ -306,7 +471,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     return 0;
   case WM_PAINT:
     if (GetTickCount() - pretick > 1000) {
-      printf("fps: %d\n", fps);
+      //printf("fps: %d\n", fps);
       fps = 0;
       pretick = GetTickCount();
     }
@@ -351,6 +516,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
   freopen("CONOUT$", "w", stdout);
 
   printf("Hello World\n");
+
+  swprintf(text_info_array, L"ratio: %0.2f\nfps: %d", data_ratio, fps);
+
+  srand((unsigned)time(NULL));
+
+  generate_random_data();
 
   /* 可以显示LOGO后，先处理后台数据 */
   scan_data_to_get_ratio();
