@@ -106,12 +106,13 @@ static IDWriteTextFormat *pTextFormat = NULL;
 
 static IWICBitmap *pWicBitmap = NULL;
 static ID2D1Bitmap *pBitmap = NULL;
+static ID2D1Bitmap *pBitmapPart = NULL;
 
 static int fps = 0;
 
-static int pos = 0;
+static int pos_display = 0;
 
-static int data_count = 1000;
+static int data_count = 200;
 static timeline_t *origin_data = NULL;
 static timeline_t *win_data = NULL;
 
@@ -143,9 +144,12 @@ static void generate_random_data(void)
   for (i = 0; i < data_count; i++) {
     origin_data[i].task = rand() % 255;
     origin_data[i].start = pos_x;
+    // Fix
     pos_x += 10;
     origin_data[i].stop = pos_x;
     pos_x += 0;
+
+    //printf("%d ", origin_data[i].task);
   }
 }
 
@@ -206,7 +210,11 @@ static void scan_data_to_get_ratio(void)
     }
   }
 
+  printf("start : %lld, stop : %lld\n", start_pos, end_pos);
+
   image_width = end_pos - start_pos;
+
+  // Qustion
   image_height = 600;
 
   printf("image: %d x %d\n", image_width, image_height);
@@ -382,9 +390,24 @@ static void draw_wic_bitmap(void)
     D2D1::RectF(0, 10, 120, 20),
     pWicBlackBrush);
 
+  wchar_t testinfo[64];
+
+  pWicRenderTarget->DrawLine(D2D1::Point2F(0, 0), D2D1::Point2F(image_width, image_height), pRedBrush);
+
+#if 0
   for (int i = 0; i < data_count; i++) {
-    draw_line(win_data[i].task, win_data[i].start, win_data[i].stop);
+    //draw_line(win_data[i].task, win_data[i].start, win_data[i].stop);
+    //draw_line(i%10+100, 10 * i, 10 * i + 10);
+
+    wsprintf(testinfo, L"%d", i);
+    pWicRenderTarget->DrawText(
+      testinfo,
+      ARRAYSIZE(testinfo) - 1,
+      pTextFormat,
+      D2D1::RectF(i, 100, 20, 20),
+      pWicBlackBrush);
   }
+#endif
 
   pWicRenderTarget->EndDraw();
 }
@@ -395,6 +418,13 @@ static int create_d2d_bitmap(void)
 
   /* Create D2D Bitmap */
   hr = pRenderTarget->CreateBitmapFromWicBitmap(pWicBitmap, &pBitmap);
+  if (S_OK != hr) {
+    printf("err = %x\n", GetLastError());
+    return S_FALSE;
+  }
+
+  /* Create D2D Bitmap for part */
+  hr = pRenderTarget->CreateBitmapFromWicBitmap(pWicBitmap, &pBitmapPart);
   if (S_OK != hr) {
     printf("err = %x\n", GetLastError());
     return S_FALSE;
@@ -412,8 +442,10 @@ static int CreateD2DResource(HWND hwnd)
   /* 创建字体资源工厂 */
   create_text_factory();
 
+  image_height = win_height;
+
   /* 创建图片资源工厂 */
-  create_wic_factory(win_width, win_height);
+  create_wic_factory(image_width, image_height);
 
   /* 图像处理工厂：绘图器 */
   create_wic_bitmap_render_target();
@@ -436,7 +468,14 @@ static void DrawRectangle(HWND hwnd)
   // clear canvas, not validate now
   pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
 
-  pRenderTarget->DrawBitmap(pBitmap, D2D1::RectF(pos, 0, win_width, win_height));
+  D2D1_RECT_U src = { pos_display, 0, pos_display+win_width, win_height};
+  D2D1_POINT_2U point = { 0, 0 };
+
+  pBitmapPart->CopyFromBitmap(&point, pBitmap, &src);
+
+  pRenderTarget->DrawBitmap(pBitmapPart, D2D1::RectF(0, 0, win_width, win_height));
+
+  //pRenderTarget->DrawBitmap(pBitmap, D2D1::RectF(0, 0, win_width, win_height));
 
   /* NOTE: Flush the content to windows */
   pRenderTarget->EndDraw();
@@ -452,22 +491,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
   switch (uMsg)
   {
+  case WM_CREATE:
+    SetTimer(hwnd, NULL, 10, NULL);
+    if (S_OK != CreateD2DResource(hwnd)) {
+      printf("D2D Init failed\n");
+    }
+    return 0;
   case WM_TIMER:
-    pos += 4;
-    if (pos > 400)
-      pos = 0;
+    pos_display++;
+    if (pos_display >= image_width - win_width)
+      pos_display = 0;
     GetClientRect(hwnd, &rect);
     InvalidateRect(hwnd, &rect, FALSE);
     return 0;
   case WM_COMMAND:
     GetClientRect(hwnd, &rect);
     InvalidateRect(hwnd, &rect, FALSE);
-    return 0;
-  case WM_CREATE:
-    SetTimer(hwnd, NULL, 10, NULL);
-    if (S_OK != CreateD2DResource(hwnd)) {
-      printf("D2D Init failed\n");
-    }
     return 0;
   case WM_PAINT:
     if (GetTickCount() - pretick > 1000) {
